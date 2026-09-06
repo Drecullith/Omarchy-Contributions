@@ -35,7 +35,7 @@ The installer places `omrescue` in `~/.local/bin` and does not use `sudo`, insta
 - Public Omarchy utilities, plugins, fixes, documentation, and upstream-ready experiments belong here.
 - Every contribution must have an explicit definition of done before implementation.
 - Existing ecosystem solutions are researched before a new tool is started.
-- Private or unreleased work from unrelated projects must never be copied, referenced, or exposed here.
+- Keep contributions self-contained and free of unrelated confidential or unreleased material.
 
 ## License
 
