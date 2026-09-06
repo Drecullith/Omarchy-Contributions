@@ -11,6 +11,7 @@ This repository contains small, finished public contributions for Omarchy.
 5. Keep contributions self-contained. Do not include unrelated confidential, private, or unreleased material.
 6. Prefer existing Omarchy interfaces and file formats over parallel frameworks.
 7. Never execute third-party plugin code merely to inspect, disable, validate, or recover from it.
+8. Diagnostic tools must distinguish proof from heuristics and must not turn uncertain evidence into automatic repair actions.
 
 ## Omarchy Plugin Rescue v1 scope
 
@@ -31,3 +32,22 @@ Out of scope unless a real defect requires a targeted fix:
 - plugin quarantine/deletion;
 - Hyprland plugin recovery;
 - general system repair.
+
+## Omarchy Rollback Check v1 scope
+
+Finished scope:
+- inspect the normal user's Omarchy migration ledger without modifying it;
+- identify the split Btrfs root/home layout relevant to root-only snapshot restore drift;
+- emit `CONFIRMED` only for exact audited migration revisions with direct machine-completion invariants;
+- emit `POTENTIAL` only for bounded timeline evidence on a matching split rollback layout;
+- refuse root and report incomplete checks explicitly;
+- never source or execute migration scripts.
+
+Out of scope unless a real defect requires a targeted fix:
+- snapshot creation, restore, or deletion;
+- migration replay or marker deletion;
+- automatic repair;
+- package changes;
+- daemon/service;
+- GUI;
+- network access, telemetry, or AI features.

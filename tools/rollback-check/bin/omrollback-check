@@ -1,0 +1,228 @@
+#!/bin/bash
+set -euo pipefail
+
+VERSION="1.0.0"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  omrollback-check
+  omrollback-check version
+  omrollback-check --help
+
+Read-only check for evidence that an Omarchy root snapshot rollback left
+migration state in $HOME ahead of the restored root filesystem.
+
+The command never changes snapshots, migration markers, packages, or configs.
+USAGE
+}
+
+case "${1:-}" in
+  "") ;;
+  version|--version|-V)
+    printf 'omrollback-check %s\n' "$VERSION"
+    exit 0
+    ;;
+  --help|-h|help)
+    usage
+    exit 0
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
+
+if [[ ${EUID:-$(id -u)} -eq 0 && ${OMROLLBACK_ALLOW_ROOT_FOR_TESTS:-0} != 1 ]]; then
+  echo "Do not run omrollback-check as root; run it as the Omarchy user whose migration state should be checked." >&2
+  exit 2
+fi
+
+command -v findmnt >/dev/null 2>&1 || { echo "findmnt is required." >&2; exit 2; }
+command -v git >/dev/null 2>&1 || { echo "git is required." >&2; exit 2; }
+
+omarchy_path="${OMROLLBACK_OMARCHY_PATH:-${OMARCHY_PATH:-/usr/share/omarchy}}"
+migrations_dir="${OMROLLBACK_MIGRATIONS_DIR:-$omarchy_path/migrations}"
+user_state_dir="${OMROLLBACK_USER_STATE_DIR:-$HOME/.local/state/omarchy/migrations}"
+system_state_dir="${OMROLLBACK_SYSTEM_STATE_DIR:-/var/lib/omarchy/migrations}"
+root_target="${OMROLLBACK_ROOT_TARGET:-/}"
+home_target="${OMROLLBACK_HOME_TARGET:-$HOME}"
+
+confirmed=0
+potential=0
+incomplete=0
+
+say_confirmed() {
+  confirmed=$((confirmed + 1))
+  printf 'CONFIRMED: %s\n' "$1"
+}
+
+say_potential() {
+  potential=$((potential + 1))
+  printf 'POTENTIAL: %s\n' "$1"
+}
+
+say_info() {
+  printf 'INFO: %s\n' "$1"
+}
+
+normalize_id() {
+  local name=${1##*/}
+  name=${name%.sh}
+  printf '%s\n' "$name"
+}
+
+is_numeric_id() {
+  [[ $1 =~ ^[0-9]{8,}$ ]]
+}
+
+has_user_marker() {
+  local id=$1
+  # Current Omarchy writes markers using the migration filename, including .sh.
+  # Accept the extensionless legacy/test shape too, but never execute either.
+  [[ -f "$user_state_dir/$id.sh" || -f "$user_state_dir/$id" ]]
+}
+
+mount_field() {
+  local field=$1 target=$2
+  findmnt -n -o "$field" --target "$target" 2>/dev/null | head -n 1 || true
+}
+
+# These are direct machine-completion invariants audited against the named
+# upstream migration revisions. For these exact script blobs, a successful
+# migration run necessarily leaves /var/lib/omarchy/migrations/<id> behind
+# (unless it was already there). If upstream changes the script, the direct
+# proof is disabled rather than guessing about new control flow.
+audited_completion_blob() {
+  case "$1" in
+    1786380259) printf '%s\n' 'ebe9af2c31c58ce91d4cfb01b647225f1c34b6f3' ;;
+    1787815267) printf '%s\n' 'b3f9282a9664e9fb195e74ad99e2efa3665e0f44' ;;
+    1788025225) printf '%s\n' '295b71ba916003ac965bf3cc13f84af9f8c5f472' ;;
+    *) return 1 ;;
+  esac
+}
+
+# Hermetic tests can replace an audited blob value without weakening normal use.
+expected_blob_for_id() {
+  local id=$1 expected
+  expected=$(audited_completion_blob "$id") || return 1
+  if [[ ${OMROLLBACK_ALLOW_ROOT_FOR_TESTS:-0} == 1 && -n ${OMROLLBACK_TEST_AUDITED_BLOB:-} ]]; then
+    printf '%s\n' "$OMROLLBACK_TEST_AUDITED_BLOB"
+  else
+    printf '%s\n' "$expected"
+  fi
+}
+
+root_fstype=$(mount_field FSTYPE "$root_target")
+home_fstype=$(mount_field FSTYPE "$home_target")
+root_source=$(mount_field SOURCE "$root_target")
+home_source=$(mount_field SOURCE "$home_target")
+root_fsroot=$(mount_field FSROOT "$root_target")
+home_fsroot=$(mount_field FSROOT "$home_target")
+
+split_rollback_unit=0
+if [[ $root_fstype == btrfs ]]; then
+  if [[ $home_fstype == btrfs && -n $root_source && -n $home_source && ( $root_source != "$home_source" || $root_fsroot != "$home_fsroot" ) ]]; then
+    split_rollback_unit=1
+    say_info "root and home are separate Btrfs mount/subvolume units; a root-only snapshot restore can leave home migration markers untouched."
+  else
+    say_info "root is Btrfs, but home does not appear separate from the root rollback unit."
+  fi
+else
+  say_info "root filesystem is not reported as Btrfs; the Omarchy Snapper root/home split described by issue #9828 may not apply."
+fi
+
+if [[ ! -d $migrations_dir ]]; then
+  echo "INCOMPLETE: Omarchy migrations directory not found: $migrations_dir"
+  incomplete=1
+fi
+
+if [[ ! -d $user_state_dir ]]; then
+  say_info "no user migration ledger found at $user_state_dir."
+fi
+
+# Signal 1: only emit CONFIRMED for machine-completion invariants whose exact
+# upstream script revision has been audited. This deliberately does NOT infer
+# completion from every /var/lib marker string found in arbitrary migration
+# source: some markers are conditional or temporary and may be absent on a
+# perfectly healthy machine.
+if [[ -d $migrations_dir && -d $user_state_dir ]]; then
+  for id in 1786380259 1787815267 1788025225; do
+    has_user_marker "$id" || continue
+
+    script="$migrations_dir/$id.sh"
+    [[ -f $script ]] || continue
+    machine_marker="$system_state_dir/$id"
+    [[ ! -e $machine_marker ]] || continue
+
+    expected_blob=$(expected_blob_for_id "$id") || continue
+    actual_blob=$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git hash-object --no-filters -- "$script" 2>/dev/null || true)
+
+    if [[ -n $actual_blob && $actual_blob == "$expected_blob" ]]; then
+      say_confirmed "user marker $id.sh exists, but its audited machine-completion marker $machine_marker is missing; normal Omarchy migration replay would skip this migration."
+    else
+      say_info "migration $id has a missing machine marker, but its installed script revision differs from the v1 audited invariant; no confirmed finding was emitted."
+    fi
+  done
+fi
+
+# Signal 2: numeric migration IDs are chronological in Omarchy. A user ledger
+# that reaches beyond every migration in the restored Omarchy tree is useful
+# evidence only when root and home are actually split into separate rollback
+# units. It remains POTENTIAL, never CONFIRMED: migrations can be removed or
+# superseded, and development builds can create unusual timelines.
+current_max=""
+user_max=""
+
+if [[ -d $migrations_dir ]]; then
+  shopt -s nullglob
+  for script in "$migrations_dir"/*.sh; do
+    id=$(normalize_id "$script")
+    if is_numeric_id "$id" && [[ -z $current_max || $id -gt $current_max ]]; then
+      current_max=$id
+    fi
+  done
+  shopt -u nullglob
+fi
+
+if [[ -d $user_state_dir ]]; then
+  shopt -s nullglob dotglob
+  for marker in "$user_state_dir"/*; do
+    [[ -f $marker ]] || continue
+    id=$(normalize_id "$marker")
+    if is_numeric_id "$id" && [[ -z $user_max || $id -gt $user_max ]]; then
+      user_max=$id
+    fi
+  done
+  shopt -u nullglob dotglob
+fi
+
+if [[ -n $current_max && -n $user_max && $user_max -gt $current_max ]]; then
+  if (( split_rollback_unit )); then
+    say_potential "user migration ledger reaches $user_max, newer than the restored Omarchy migration tree ($current_max), while root and home are separate rollback units."
+  else
+    say_info "user migration ledger reaches $user_max, newer than the Omarchy migration tree ($current_max), but this filesystem layout does not match the known root/home rollback mechanism; no rollback finding was emitted."
+  fi
+fi
+
+printf '\nResult: '
+if (( confirmed > 0 )); then
+  printf 'CONFIRMED migration-state inconsistency detected.\n'
+  printf 'No changes were made. Do not delete markers or replay migrations blindly; inspect the named migration(s) before recovery.\n'
+  exit 1
+elif (( potential > 0 )); then
+  printf 'POTENTIAL rollback-related migration drift detected.\n'
+  printf 'No changes were made. This is evidence, not proof; review the reported timeline before taking recovery action.\n'
+  exit 1
+elif (( incomplete > 0 )); then
+  printf 'INCOMPLETE check.\n'
+  printf 'No changes were made.\n'
+  exit 2
+else
+  printf 'no rollback-related inconsistency evidence detected.\n'
+  if (( split_rollback_unit )); then
+    printf 'This layout is still susceptible to root/home rollback drift; the check can only report evidence it can safely prove or bound.\n'
+  fi
+  printf 'No changes were made.\n'
+  exit 0
+fi
