@@ -12,7 +12,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Syntax check
         run: |
@@ -23,11 +25,21 @@ jobs:
       - name: Run isolated tests
         run: bash tools/plugin-rescue/test/run.sh
 
+      - name: Installer smoke test
+        run: |
+          test_home="$(mktemp -d)"
+          trap 'rm -rf "$test_home"' EXIT
+          HOME="$test_home" bash tools/plugin-rescue/install.sh
+          test -x "$test_home/.local/bin/omrescue"
+          "$test_home/.local/bin/omrescue" version | grep -Fx 'omrescue 1.0.0'
+
   rollback-check:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Syntax check
         run: |
@@ -37,3 +49,20 @@ jobs:
 
       - name: Run isolated tests
         run: bash tools/rollback-check/test/run.sh
+
+      - name: Installer smoke test
+        run: |
+          test_home="$(mktemp -d)"
+          trap 'rm -rf "$test_home"' EXIT
+          HOME="$test_home" bash tools/rollback-check/install.sh
+          test -x "$test_home/.local/bin/omrollback-check"
+          "$test_home/.local/bin/omrollback-check" version | grep -Fx 'omrollback-check 1.0.0'
+
+      - name: Verify root refusal
+        run: |
+          set +e
+          output="$(sudo -H env HOME=/root tools/rollback-check/bin/omrollback-check 2>&1)"
+          status=$?
+          set -e
+          test "$status" -eq 2
+          grep -F 'Do not run omrollback-check as root' <<<"$output"
