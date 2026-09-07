@@ -38,8 +38,6 @@ It intentionally does **not** flag every `.conf` file. Current Quattro still leg
 - **ACTIVE** — a legacy `hyprland.conf` exists and no Quattro `hyprland.lua` entry point was found. That shape does not match the Lua-provider orphaning mechanism v1 is designed to detect.
 - **INCOMPLETE** — the expected Hyprland config directory or provider entry point is missing, so the audit cannot classify the machine reliably.
 
-If a legacy filename appears in non-comment Lua code, v1 reports the reference as `INFO` but does **not** treat the mention as proof that the old hyprlang file is actually loaded.
-
 Exit codes:
 
 ```text
@@ -88,7 +86,7 @@ bash tools/migration-check/install.sh
 
 The installer places `ommigration-check` in `~/.local/bin`.
 
-Dependencies: Bash plus standard GNU/Linux tools (`awk`, `find`) already expected on Omarchy.
+Dependencies: Bash plus standard GNU/Linux `awk`, already expected on Omarchy.
 
 ## Scope boundary
 

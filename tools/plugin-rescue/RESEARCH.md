@@ -51,6 +51,19 @@ The specific gap this project fills is:
 
 > Offline/config-level, third-party-only shell-plugin safe mode with exact reversible restore, without requiring the broken Quickshell IPC process and without resetting unrelated shell customization.
 
+## Maintenance audit — 2026-09-08
+
+The upstream assumptions behind v1 were re-checked against current `quattro`.
+
+- `omarchy-plugin-disable` still forwards to the running shell over IPC, so it is not a dead-shell recovery path.
+- `omarchy-refresh-shell` still refreshes `shell.json`, restores bar defaults, and restarts the shell, so it remains broader than Plugin Rescue.
+- The current plugin registry still records active third-party references through the selected bar id, bar layout entries, and `plugins[]`; clone restore and disabled-plugin state remain compatible with the rescue sanitizer.
+- The official CLI plugin validator still enforces the same safe plugin-id shape used by Plugin Rescue: `^[A-Za-z0-9][A-Za-z0-9._-]*$`, excluding the reserved `omarchy.*` namespace.
+- Recent upstream plugin capability/authentication hardening reduces what third-party plugins can access, but it does not provide an offline third-party-only safe mode or remove the availability/recovery failure class.
+- A fresh PR search found no equivalent targeted rescue feature.
+
+Conclusion: **v1 remains useful and no code change is required as of 2026-09-08.**
+
 ## References
 
 - Omarchy shell plugins: https://github.com/omacom/omarchy/blob/quattro/manual/32-shell-plugins.md

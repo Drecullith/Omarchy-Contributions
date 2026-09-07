@@ -67,6 +67,19 @@ Before implementation, searches covered:
 
 No obvious current public equivalent was found. This is intentionally narrower than a general backup, snapshot, dotfile, or repair tool.
 
+## Maintenance audit — 2026-09-08
+
+The rollback assumptions and audited invariants were re-checked against current `quattro`.
+
+- Issue `#9828` is still open.
+- `omarchy-migrate` still records completion under `$HOME/.local/state/omarchy/migrations` and skips migrations whose user marker already exists.
+- `omarchy snapshot restore` still delegates directly to `limine-snapper-restore`; no migration-ledger reconciliation was found in the user-facing restore path.
+- The three migration files used for `CONFIRMED` findings still have exactly the audited Git blob ids listed above.
+- Current source still contains conditional and temporary `/var/lib/omarchy/migrations/...` markers, including newer bookkeeping such as the `1788662350` quarantine/reload markers, so broad marker scanning would still be unsafe.
+- A fresh PR search found no upstream rollback-ledger reconciliation equivalent.
+
+Conclusion: **v1 remains useful and its current conservative proof set is still valid. No code change is required as of 2026-09-08.**
+
 ## Definition of Done
 
 v1 is complete when the command:

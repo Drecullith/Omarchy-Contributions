@@ -63,7 +63,7 @@ A non-comment line proves that a legacy file contains configuration-like content
 
 So v1 reports `POSSIBLY_IGNORED` and tells the user where to review the wanted settings. It never auto-converts or deletes the source file.
 
-If a legacy filename appears in Lua code, the tool reports that fact as informational only. A textual mention is not enough to prove that Hyprland loaded a hyprlang file under the Lua provider.
+The final v1 classifier intentionally does not inspect Lua files for textual references to legacy filenames. A filename mention is neither necessary nor sufficient to prove that old hyprlang configuration is loaded, so classification is based only on the bounded legacy-file state and the provider shape.
 
 ## Existing-solution search
 
@@ -79,6 +79,18 @@ No equivalent standalone post-upgrade config-orphan audit was found.
 The community project `duclucky/can-i-omarchy` is a pre-install application compatibility/readiness checker, not a post-migration machine audit, so it does not overlap this scope.
 
 The Omarchy Plugin Marketplace and hosted registry focus on third-party plugin discovery, publication, verification, and installation. This tool is intentionally a standalone local diagnostic and does not duplicate plugin-registry functionality.
+
+## Maintenance audit — 2026-09-08
+
+The v1 assumptions were re-checked against current `quattro`.
+
+- Issue `#6933` remains open.
+- A fresh PR search found no upstream fix or equivalent doctor-style audit for the reported `.conf` → Lua orphaning gap.
+- Current `config/hypr/hyprland.lua` still loads `hypr.monitors`, `hypr.input`, `hypr.bindings`, `hypr.looknfeel`, and `hypr.autostart` and does not restore the old core `.conf` provider shape.
+- Current `config/hypr/` still legitimately contains standalone `hyprsunset.conf` and `xdph.conf`, so excluding them remains necessary to avoid false positives.
+- The checker logic already reflects the conservative final design; only stale documentation from the removed Lua-filename heuristic needed correction.
+
+Conclusion: **v1 remains useful and no code change is required as of 2026-09-08.**
 
 ## Definition of Done
 
