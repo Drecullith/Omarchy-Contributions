@@ -1,0 +1,158 @@
+#!/bin/bash
+set -euo pipefail
+
+VERSION="1.0.0"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  ommigration-check
+  ommigration-check version
+  ommigration-check --help
+
+Read-only audit for legacy Omarchy Hyprland .conf files that may have been
+left behind when Quattro switched the active user configuration to Lua.
+
+The command never edits, deletes, migrates, sources, or executes config files.
+USAGE
+}
+
+case "${1:-}" in
+  "") ;;
+  version|--version|-V)
+    printf 'ommigration-check %s\n' "$VERSION"
+    exit 0
+    ;;
+  --help|-h|help)
+    usage
+    exit 0
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
+
+if [[ ${EUID:-$(id -u)} -eq 0 && ${OMMIGRATION_ALLOW_ROOT_FOR_TESTS:-0} != 1 ]]; then
+  echo "Do not run ommigration-check as root; run it as the Omarchy user whose Hyprland config should be checked." >&2
+  exit 2
+fi
+
+hypr_dir="${OMMIGRATION_HYPR_DIR:-$HOME/.config/hypr}"
+lua_entry="${OMMIGRATION_LUA_ENTRY:-$hypr_dir/hyprland.lua}"
+
+if [[ ! -d $hypr_dir ]]; then
+  printf 'INCOMPLETE: Hyprland config directory not found: %s\n' "$hypr_dir"
+  printf '\nResult: INCOMPLETE check.\nNo changes were made.\n'
+  exit 2
+fi
+
+legacy_names=(
+  hyprland.conf
+  envs.conf
+  monitors.conf
+  input.conf
+  bindings.conf
+  looknfeel.conf
+  autostart.conf
+)
+
+meaningful_line_count() {
+  awk '
+    {
+      line=$0
+      sub(/^[[:space:]]+/, "", line)
+      if (line == "" || line ~ /^#/) next
+      count++
+    }
+    END { print count + 0 }
+  ' "$1"
+}
+
+suggested_target() {
+  case "$1" in
+    hyprland.conf) printf '%s\n' "$hypr_dir/hyprland.lua" ;;
+    envs.conf) printf '%s\n' "$hypr_dir/hyprland.lua (or another required Lua module)" ;;
+    monitors.conf) printf '%s\n' "$hypr_dir/monitors.lua" ;;
+    input.conf) printf '%s\n' "$hypr_dir/input.lua" ;;
+    bindings.conf) printf '%s\n' "$hypr_dir/bindings.lua" ;;
+    looknfeel.conf) printf '%s\n' "$hypr_dir/looknfeel.lua" ;;
+    autostart.conf) printf '%s\n' "$hypr_dir/autostart.lua" ;;
+    *) return 1 ;;
+  esac
+}
+
+lua_reference_file() {
+  local legacy_name=$1 lua
+  while IFS= read -r -d '' lua; do
+    if awk -v needle="$legacy_name" '
+      {
+        line=$0
+        sub(/^[[:space:]]+/, "", line)
+        if (line ~ /^--/) next
+        if (index(line, needle) > 0) found=1
+      }
+      END { exit found ? 0 : 1 }
+    ' "$lua"; then
+      printf '%s\n' "$lua"
+      return 0
+    fi
+  done < <(find "$hypr_dir" -maxdepth 1 -type f -name '*.lua' -print0 2>/dev/null)
+  return 1
+}
+
+if [[ ! -f $lua_entry ]]; then
+  if [[ -f $hypr_dir/hyprland.conf ]]; then
+    printf 'ACTIVE: legacy hyprland.conf exists and no Quattro hyprland.lua entry point was found.\n'
+    printf 'INFO: this machine does not match the Lua-provider migration shape audited by v1.\n'
+    printf '\nResult: no Quattro legacy-config orphaning evidence detected.\n'
+    printf 'No changes were made.\n'
+    exit 0
+  fi
+
+  printf 'INCOMPLETE: neither Quattro Lua entry point nor legacy hyprland.conf was found in %s\n' "$hypr_dir"
+  printf '\nResult: INCOMPLETE check.\nNo changes were made.\n'
+  exit 2
+fi
+
+printf 'INFO: Quattro Lua entry point found: %s\n' "$lua_entry"
+
+found=0
+legacy=0
+possibly_ignored=0
+
+for name in "${legacy_names[@]}"; do
+  file="$hypr_dir/$name"
+  [[ -f $file ]] || continue
+  found=$((found + 1))
+  meaningful=$(meaningful_line_count "$file")
+
+  if (( meaningful > 0 )); then
+    possibly_ignored=$((possibly_ignored + 1))
+    if reference=$(lua_reference_file "$name"); then
+      printf 'INFO: %s is mentioned by non-comment Lua code in %s; v1 treats that as a reference only, not proof that Hyprland loaded the legacy hyprlang file.\n' "$file" "$reference"
+    fi
+    printf 'POSSIBLY_IGNORED: %s contains %d non-comment configuration line(s) alongside a Quattro Lua entry point.\n' \
+      "$file" "$meaningful"
+    target=$(suggested_target "$name")
+    printf 'INFO: review the wanted settings against %s before removing the legacy file.\n' "$target"
+  else
+    legacy=$((legacy + 1))
+    printf 'LEGACY: %s exists but contains only blank/comment lines.\n' "$file"
+  fi
+done
+
+printf '\nResult: '
+if (( possibly_ignored > 0 )); then
+  printf '%d possibly ignored legacy Hyprland config file(s) detected.\n' "$possibly_ignored"
+  printf 'No changes were made. Review the named files and port wanted settings to the corresponding Lua config; do not delete legacy files until you have verified the replacement.\n'
+  exit 1
+elif (( found == 0 )); then
+  printf 'no known legacy Hyprland core .conf files detected alongside the Quattro Lua entry point.\n'
+  printf 'No changes were made.\n'
+  exit 0
+else
+  printf 'no possibly ignored legacy configuration detected (%d inert legacy file(s)).\n' "$legacy"
+  printf 'No changes were made.\n'
+  exit 0
+fi

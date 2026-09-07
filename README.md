@@ -30,6 +30,18 @@ omrollback-check
 
 `CONFIRMED` findings are limited to exact upstream migration revisions with audited machine-completion invariants. Broader timeline evidence is reported only as `POTENTIAL` on a matching split Btrfs root/home layout.
 
+### Omarchy Migration Check — v1.0.0
+
+A read-only Quattro audit for known legacy Hyprland core `.conf` files that can survive the 3.x → Lua migration with configuration-like content even though the active user config has moved to `hyprland.lua`.
+
+See [`tools/migration-check/`](tools/migration-check/README.md).
+
+```bash
+ommigration-check
+```
+
+The checker reports conservative `POSSIBLY_IGNORED`, `LEGACY`, `ACTIVE`, and `INCOMPLETE` states, points at the corresponding Lua review target, and never converts, deletes, sources, or executes user configuration.
+
 ## Install
 
 Clone the repository once:
@@ -51,7 +63,13 @@ Install Rollback Check:
 bash tools/rollback-check/install.sh
 ```
 
-Both installers place their command in `~/.local/bin`. Neither installer uses `sudo`, installs a daemon, or modifies Omarchy's own command files.
+Install Migration Check:
+
+```bash
+bash tools/migration-check/install.sh
+```
+
+All installers place their command in `~/.local/bin`. None uses `sudo`, installs a daemon, or modifies Omarchy's own command files.
 
 ## Project boundaries
 
