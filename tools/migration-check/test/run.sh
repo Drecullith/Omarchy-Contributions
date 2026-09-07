@@ -49,7 +49,7 @@ binddr = SUPER, GRAVE, Toggle dictation, exec, voxtype record toggle
 CONF
 run_tool
 [[ $TOOL_STATUS -eq 1 && $TOOL_OUT == *'POSSIBLY_IGNORED:'* && $TOOL_OUT == *'bindings.conf'* ]] &&
-  pass 'unreferenced binding config is reported as possibly ignored' || fail 'orphaned bindings' "$TOOL_OUT"
+  pass 'unported binding config is reported as possibly ignored' || fail 'orphaned bindings' "$TOOL_OUT"
 rm -rf "$FIX"
 
 new_fixture
@@ -70,11 +70,12 @@ input {
 }
 CONF
 cat >> "$FIX/home/.config/hypr/input.lua" <<'LUA'
-local legacy = "input.conf"
+-- Mentioning the old filename does not prove it is loaded.
+local migration_note = "input.conf"
 LUA
 run_tool
-[[ $TOOL_STATUS -eq 1 && $TOOL_OUT == *'INFO:'* && $TOOL_OUT == *'reference only, not proof'* && $TOOL_OUT == *'POSSIBLY_IGNORED:'* ]] &&
-  pass 'Lua mention is reported but does not become false proof of activity' || fail 'Lua mention handling' "$TOOL_OUT"
+[[ $TOOL_STATUS -eq 1 && $TOOL_OUT == *'POSSIBLY_IGNORED:'* && $TOOL_OUT != *'reference only'* ]] &&
+  pass 'Lua filename mentions do not affect evidence classification' || fail 'Lua mention handling' "$TOOL_OUT"
 rm -rf "$FIX"
 
 new_fixture
@@ -86,7 +87,7 @@ cat >> "$FIX/home/.config/hypr/bindings.lua" <<'LUA'
 LUA
 run_tool
 [[ $TOOL_STATUS -eq 1 && $TOOL_OUT == *'POSSIBLY_IGNORED:'* ]] &&
-  pass 'commented Lua mention does not create false active status' || fail 'commented reference' "$TOOL_OUT"
+  pass 'commented Lua mention does not change orphan classification' || fail 'commented reference' "$TOOL_OUT"
 rm -rf "$FIX"
 
 new_fixture

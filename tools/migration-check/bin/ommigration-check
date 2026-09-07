@@ -47,6 +47,10 @@ if [[ ! -d $hypr_dir ]]; then
   exit 2
 fi
 
+# These are the pre-Quattro core user configuration files that correspond to
+# the Lua-provider configuration split. Do not broaden this to every *.conf:
+# current Quattro still intentionally ships standalone Hyprland-adjacent conf
+# files such as hyprsunset.conf and xdph.conf.
 legacy_names=(
   hyprland.conf
   envs.conf
@@ -82,25 +86,9 @@ suggested_target() {
   esac
 }
 
-lua_reference_file() {
-  local legacy_name=$1 lua
-  while IFS= read -r -d '' lua; do
-    if awk -v needle="$legacy_name" '
-      {
-        line=$0
-        sub(/^[[:space:]]+/, "", line)
-        if (line ~ /^--/) next
-        if (index(line, needle) > 0) found=1
-      }
-      END { exit found ? 0 : 1 }
-    ' "$lua"; then
-      printf '%s\n' "$lua"
-      return 0
-    fi
-  done < <(find "$hypr_dir" -maxdepth 1 -type f -name '*.lua' -print0 2>/dev/null)
-  return 1
-}
-
+# Without the Quattro Lua entry point, a surviving hyprland.conf indicates the
+# legacy provider shape rather than the migration-orphaning shape v1 audits.
+# We deliberately do not parse or execute the config to prove more than that.
 if [[ ! -f $lua_entry ]]; then
   if [[ -f $hypr_dir/hyprland.conf ]]; then
     printf 'ACTIVE: legacy hyprland.conf exists and no Quattro hyprland.lua entry point was found.\n'
@@ -129,9 +117,6 @@ for name in "${legacy_names[@]}"; do
 
   if (( meaningful > 0 )); then
     possibly_ignored=$((possibly_ignored + 1))
-    if reference=$(lua_reference_file "$name"); then
-      printf 'INFO: %s is mentioned by non-comment Lua code in %s; v1 treats that as a reference only, not proof that Hyprland loaded the legacy hyprlang file.\n' "$file" "$reference"
-    fi
     printf 'POSSIBLY_IGNORED: %s contains %d non-comment configuration line(s) alongside a Quattro Lua entry point.\n' \
       "$file" "$meaningful"
     target=$(suggested_target "$name")
