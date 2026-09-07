@@ -51,3 +51,26 @@ Out of scope unless a real defect requires a targeted fix:
 - daemon/service;
 - GUI;
 - network access, telemetry, or AI features.
+
+## Omarchy Migration Check v1 scope
+
+Finished scope:
+- inspect the normal user's Hyprland config without modifying it;
+- detect the bounded pre-Quattro core `.conf` file set alongside a Quattro `hyprland.lua` entry point;
+- report nonblank, non-comment legacy content only as `POSSIBLY_IGNORED`;
+- keep blank/comment-only remnants informational as `LEGACY`;
+- recognize a legacy-only provider shape without blaming the Quattro Lua migration;
+- exclude current standalone `.conf` files such as `hyprsunset.conf` and `xdph.conf`;
+- point to the corresponding Lua review target without translating configuration;
+- refuse root and report incomplete checks explicitly;
+- never source or execute legacy config or Lua files.
+
+Out of scope unless a real defect requires a targeted fix:
+- automatic `.conf` → Lua conversion;
+- config deletion, renaming, or repair;
+- live Hyprland mutation or `hyprctl` repair;
+- general migration replay;
+- package changes;
+- daemon/service;
+- GUI;
+- network access, telemetry, or AI features.

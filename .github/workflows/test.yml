@@ -66,3 +66,37 @@ jobs:
           set -e
           test "$status" -eq 2
           grep -F 'Do not run omrollback-check as root' <<<"$output"
+
+  migration-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Syntax check
+        run: |
+          bash -n tools/migration-check/bin/ommigration-check
+          bash -n tools/migration-check/install.sh
+          bash -n tools/migration-check/test/run.sh
+
+      - name: Run isolated tests
+        run: bash tools/migration-check/test/run.sh
+
+      - name: Installer smoke test
+        run: |
+          test_home="$(mktemp -d)"
+          trap 'rm -rf "$test_home"' EXIT
+          HOME="$test_home" bash tools/migration-check/install.sh
+          test -x "$test_home/.local/bin/ommigration-check"
+          "$test_home/.local/bin/ommigration-check" version | grep -Fx 'ommigration-check 1.0.0'
+
+      - name: Verify root refusal
+        run: |
+          set +e
+          output="$(sudo -H env HOME=/root tools/migration-check/bin/ommigration-check 2>&1)"
+          status=$?
+          set -e
+          test "$status" -eq 2
+          grep -F 'Do not run ommigration-check as root' <<<"$output"
