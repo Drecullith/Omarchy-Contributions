@@ -100,3 +100,39 @@ jobs:
           set -e
           test "$status" -eq 2
           grep -F 'Do not run ommigration-check as root' <<<"$output"
+
+  context-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Syntax check
+        run: |
+          python3 -m py_compile tools/context-snapshot/bin/omcontext tools/context-snapshot/lib/*.py
+          bash -n tools/context-snapshot/install.sh
+          bash -n tools/context-snapshot/test/run.sh
+
+      - name: Run isolated tests
+        run: bash tools/context-snapshot/test/run.sh
+
+      - name: Installer smoke test
+        run: |
+          test_home="$(mktemp -d)"
+          trap 'rm -rf "$test_home"' EXIT
+          HOME="$test_home" bash tools/context-snapshot/install.sh
+          test -x "$test_home/.local/bin/omcontext"
+          "$test_home/.local/bin/omcontext" --version | grep -Fx 'omcontext 1.0.0'
+
+      - name: Verify root refusal
+        run: |
+          test_home="$(mktemp -d)"
+          trap 'rm -rf "$test_home"' EXIT
+          set +e
+          output="$(sudo -H env HOME="$test_home" tools/context-snapshot/bin/omcontext quick 2>&1)"
+          status=$?
+          set -e
+          test "$status" -eq 2
+          grep -F 'Do not run omcontext as root' <<<"$output"

@@ -42,6 +42,19 @@ ommigration-check
 
 The checker reports conservative `POSSIBLY_IGNORED`, `LEGACY`, `ACTIVE`, and `INCOMPLETE` states, points at the corresponding Lua review target, and never converts, deletes, sources, or executes user configuration.
 
+### Omarchy Context Snapshot — v1.0.0
+
+A local, read-only known-good baseline and incident-delta collector for Omarchy. It correlates package/version changes, migration markers, selected config fingerprints, failed services, disk pressure, Omarchy metadata, and a bounded sanitized journal sample without collecting config contents or uploading anything.
+
+See [`tools/context-snapshot/`](tools/context-snapshot/README.md).
+
+```bash
+omcontext baseline
+omcontext incident
+```
+
+The JSON snapshot/delta contract is schema-versioned for deterministic tooling and future local-assistant consumers while remaining independent of any AI model.
+
 ## Install
 
 Clone the repository once:
@@ -67,6 +80,12 @@ Install Migration Check:
 
 ```bash
 bash tools/migration-check/install.sh
+```
+
+Install Context Snapshot:
+
+```bash
+bash tools/context-snapshot/install.sh
 ```
 
 All installers place their command in `~/.local/bin`. None uses `sudo`, installs a daemon, or modifies Omarchy's own command files.
