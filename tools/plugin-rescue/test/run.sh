@@ -89,7 +89,7 @@ JSON
 run_bin --no-restart >/dev/null
 assert_jq "clone widget restored to first-party source with settings preserved" '.bar.layout.center[0].id == "omarchy.clock" and .bar.layout.center[0].format == "HH:mm:ss"' "$HOME/.config/omarchy/shell.json"
 assert_jq "clone center anchor restored" '.bar.centerAnchor == "omarchy.clock"' "$HOME/.config/omarchy/shell.json"
-assert_jq "active clone source temporarily re-enabled" '(.disabledPlugins | index("omarchy.clock")) == null and (.disabledPlugins | index("omarchy.weather")) != null' "$HOME/.config/omarchy/shell.json"
+assert_jq "active clone source temporarily re-enabled" '(.disabledPlugins | index("omarchy.clock")) == null and (.disabledPlugins | index("omarchy.weather") != null)' "$HOME/.config/omarchy/shell.json"
 assert_jq "clone restore bookkeeping removed in safe config" 'has("cloneSourceRestores") | not' "$HOME/.config/omarchy/shell.json"
 cleanup
 
@@ -154,6 +154,22 @@ cat > "$HOME/.config/omarchy/plugins/evil.clone/manifest.json" <<'JSON'
 JSON
 run_bin rescue --no-restart >/dev/null
 assert_jq "untrusted clonedFrom cannot activate another third-party id" '.bar.layout.left | length == 0' "$HOME/.config/omarchy/shell.json"
+cleanup
+
+# 8. Concurrent rescue/restore state mutation is rejected while the lock is held.
+new_env
+cat > "$HOME/.config/omarchy/shell.json" <<'JSON'
+{"version":1,"bar":{"layout":{"left":[{"id":"third.widget"}],"center":[],"right":[]}},"plugins":[]}
+JSON
+mkdir -p "$XDG_STATE_HOME/omrescue/snapshots"
+exec {test_lock_fd}>"$XDG_STATE_HOME/omrescue/lock"
+flock -n "$test_lock_fd"
+if run_bin rescue --no-restart >/dev/null 2>&1; then
+  bad "concurrent rescue operation is rejected"
+else
+  ok "concurrent rescue operation is rejected"
+fi
+exec {test_lock_fd}>&-
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 (( FAIL == 0 ))
