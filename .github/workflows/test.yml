@@ -31,7 +31,7 @@ jobs:
           trap 'rm -rf "$test_home"' EXIT
           HOME="$test_home" bash tools/plugin-rescue/install.sh
           test -x "$test_home/.local/bin/omrescue"
-          "$test_home/.local/bin/omrescue" version | grep -Fx 'omrescue 1.0.0'
+          "$test_home/.local/bin/omrescue" version | grep -Fx 'omrescue 1.0.1'
 
   rollback-check:
     runs-on: ubuntu-latest
