@@ -51,10 +51,27 @@ A local, read-only known-good baseline and incident-delta collector for Omarchy.
 
 See [`tools/context-snapshot/`](tools/context-snapshot/README.md).
 
+Common commands:
+
 ```bash
 omcontext baseline
+omcontext quick
 omcontext incident
+omcontext diff
+omcontext show baseline
+omcontext show latest
 ```
+
+Machine-readable JSON is also available for the snapshot and delta commands:
+
+```bash
+omcontext quick --json
+omcontext baseline --json
+omcontext incident --json
+omcontext diff --json
+```
+
+`baseline` stores a known-good reference, `quick` checks the current state without saving a snapshot, `incident` captures and compares the current state to the baseline, `diff` re-renders the latest saved comparison, and `show` inspects the stored sanitized baseline or latest snapshot.
 
 The JSON snapshot/delta contract is schema-versioned for deterministic tooling and future local-assistant consumers while remaining independent of any AI model.
 
