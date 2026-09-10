@@ -1,0 +1,80 @@
+#!/usr/bin/python3
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+source_lib = Path(__file__).resolve().parent.parent / "lib"
+installed_lib = Path(__file__).resolve().parent.parent / "share/omcontext"
+sys.path.insert(0, str(source_lib if source_lib.is_dir() else installed_lib))
+
+from omcontext_collect import collect_snapshot
+from omcontext_common import VERSION, SCHEMA_VERSION, atomic_json, ensure_state_dir, get_state_dir, read_json
+from omcontext_delta import diff_snapshots, render_quick, render_report
+
+
+def eprint(text: str) -> None:
+    print(text, file=sys.stderr)
+
+
+def stamp(value: str) -> str:
+    return re.sub(r"[^0-9TZ]", "", value)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="omcontext", description="Read-only Omarchy state snapshots and known-good deltas.")
+    parser.add_argument("--version", action="version", version=f"omcontext {VERSION}")
+    sub = parser.add_subparsers(dest="command", required=True)
+    for name in ("quick", "baseline", "incident", "diff"):
+        p = sub.add_parser(name); p.add_argument("--json", action="store_true")
+    show = sub.add_parser("show"); show.add_argument("which", choices=("baseline", "latest"))
+    args = parser.parse_args()
+
+    if os.geteuid() == 0 and os.environ.get("OMCONTEXT_ALLOW_ROOT_FOR_TESTS") != "1":
+        eprint("Do not run omcontext as root; run it as the Omarchy user whose state should be captured.")
+        return 2
+
+    state = get_state_dir()
+    try:
+        ensure_state_dir(state)
+    except RuntimeError as exc:
+        eprint(str(exc)); return 2
+    baseline_path, latest_path = state / "baseline.json", state / "latest.json"
+
+    try:
+        if args.command == "quick":
+            snap = collect_snapshot(VERSION, SCHEMA_VERSION)
+            print(json.dumps(snap, indent=2, sort_keys=True) if args.json else render_quick(snap), end="\n" if args.json else "")
+            return 0
+        if args.command == "baseline":
+            snap = collect_snapshot(VERSION, SCHEMA_VERSION); atomic_json(baseline_path, snap)
+            if args.json: print(json.dumps(snap, indent=2, sort_keys=True))
+            else:
+                print(f"Baseline saved: {baseline_path}"); print(f"Privacy scan: {snap['privacy_scan']['status']}")
+            return 0
+        if args.command == "incident":
+            if not baseline_path.exists(): eprint("No baseline found. Run: omcontext baseline"); return 2
+            base = read_json(baseline_path); snap = collect_snapshot(VERSION, SCHEMA_VERSION)
+            atomic_json(latest_path, snap); atomic_json(state / "history" / f"{stamp(snap['captured_at'])}.json", snap)
+            delta = diff_snapshots(base, snap, SCHEMA_VERSION)
+            print(json.dumps(delta, indent=2, sort_keys=True) if args.json else render_report(delta), end="\n" if args.json else "")
+            return 1 if delta["health"] == "degraded" else 0
+        if args.command == "diff":
+            if not baseline_path.exists() or not latest_path.exists():
+                eprint("Need both baseline and latest snapshots. Run baseline, then incident."); return 2
+            delta = diff_snapshots(read_json(baseline_path), read_json(latest_path), SCHEMA_VERSION)
+            print(json.dumps(delta, indent=2, sort_keys=True) if args.json else render_report(delta), end="\n" if args.json else "")
+            return 1 if delta["health"] == "degraded" else 0
+        path = baseline_path if args.which == "baseline" else latest_path
+        if not path.exists(): eprint(f"Snapshot not found: {path}"); return 2
+        print(json.dumps(read_json(path), indent=2, sort_keys=True)); return 0
+    except (OSError, json.JSONDecodeError, RuntimeError) as exc:
+        eprint(f"omcontext: {exc}"); return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

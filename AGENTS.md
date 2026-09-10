@@ -74,3 +74,26 @@ Out of scope unless a real defect requires a targeted fix:
 - daemon/service;
 - GUI;
 - network access, telemetry, or AI features.
+
+## Omarchy Context Snapshot v1 scope
+
+Finished scope:
+- create a private known-good snapshot for the normal Omarchy user;
+- create a later incident/latest snapshot and compare it to the baseline;
+- expose concise human reports and stable schema-v1 JSON;
+- compare package versions, numeric user migration markers, selected config fingerprints, failed service names, Omarchy metadata, and disk usage;
+- include only a bounded current-boot warning/error journal sample after sanitization;
+- fingerprint selected config files without copying their contents;
+- keep state private, write snapshots atomically, and refuse symlinked state directories;
+- refuse root and report incomplete collectors explicitly;
+- never use the network or make repair changes.
+
+Out of scope unless a real defect requires a targeted fix:
+- daemon/background watcher or scheduled monitoring;
+- automatic repair or service restarts;
+- package/migration/snapshot/config changes;
+- arbitrary config-file discovery or raw config collection;
+- raw journal export;
+- network access, telemetry, or uploads;
+- AI/model calls or Lychnos-specific dependencies;
+- root-only diagnostics.
