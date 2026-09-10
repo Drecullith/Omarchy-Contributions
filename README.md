@@ -6,7 +6,7 @@ The rule for this repository is deliberately strict: **research first, define a 
 
 ## Contributions
 
-### Omarchy Plugin Rescue — v1.0.0
+### Omarchy Plugin Rescue — v1.0.1
 
 A TTY-safe recovery utility for Omarchy 4 / Quattro that temporarily removes **only third-party shell-plugin references** from `~/.config/omarchy/shell.json`, preserves the rest of the user's shell configuration, and can restore the exact original file afterward.
 
