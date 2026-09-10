@@ -12,35 +12,63 @@ A TTY-safe recovery utility for Omarchy 4 / Quattro that temporarily removes **o
 
 See [`tools/plugin-rescue/`](tools/plugin-rescue/README.md).
 
+Common commands:
+
 ```bash
 omrescue
+omrescue rescue
+omrescue rescue --no-restart
+omrescue restore
+omrescue restore --force
+omrescue restore --no-restart
+omrescue status
+omrescue version
+omrescue --help
 ```
 
-Restore the exact pre-rescue shell configuration with `omrescue restore`.
+`omrescue` with no subcommand is the same as `omrescue rescue`. `--no-restart` leaves shell restart to the user, while `restore --force` deliberately overwrites a shell config that changed after rescue mode was entered.
 
 ### Omarchy Rollback Check + Guided Recovery
 
 `omrollback-check` remains the conservative, read-only detector for root/home migration-ledger drift after an Omarchy root snapshot restore.
 
-`omrollback-plan` is the new read-only recovery companion. It turns Rollback Check findings into a bounded inspect → prepare → verify sequence and, when available, correlates them with Omarchy Context Snapshot schema-v1 deltas.
+`omrollback-plan` is the read-only recovery companion. It turns Rollback Check findings into a bounded inspect → prepare → verify sequence and, when available, correlates them with Omarchy Context Snapshot schema-v1 deltas.
 
 See [`tools/rollback-check/`](tools/rollback-check/README.md).
 
+Rollback Check commands:
+
 ```bash
 omrollback-check
-omrollback-plan
+omrollback-check version
+omrollback-check --help
 ```
 
-The planner can emit stable JSON for deterministic tooling and future Lychnos integration, but it explicitly authorizes **no automatic repair actions**. It never restores snapshots, replays migrations, deletes markers, changes packages/configuration, or restarts services.
+Guided Recovery commands and options:
+
+```bash
+omrollback-plan
+omrollback-plan --json
+omrollback-plan --no-context
+omrollback-plan --context-file /path/to/context-delta.json
+omrollback-plan --version
+omrollback-plan --help
+```
+
+`--json` emits the stable planning contract, `--no-context` disables optional Context Snapshot correlation, and `--context-file` uses an explicit schema-v1 Context Snapshot delta. The planner explicitly authorizes **no automatic repair actions**. It never restores snapshots, replays migrations, deletes markers, changes packages/configuration, or restarts services.
 
 ### Omarchy Migration Check — v1.0.0
 
-A read-only Quattro audit for known legacy Hyprland core `.conf` files that can survive the 3.x → Lua migration with configuration-like content even though the active user config has moved to `hyprland.lua`.
+A read-only Quattro audit for known legacy Hyprland core `.conf` files that can survive the 3.x → Lua migration with configuration-like content even though the active Hyprland configuration has moved to Lua.
 
 See [`tools/migration-check/`](tools/migration-check/README.md).
 
+Commands:
+
 ```bash
 ommigration-check
+ommigration-check version
+ommigration-check --help
 ```
 
 The checker reports conservative `POSSIBLY_IGNORED`, `LEGACY`, `ACTIVE`, and `INCOMPLETE` states, points at the corresponding Lua review target, and never converts, deletes, sources, or executes user configuration.
@@ -62,13 +90,20 @@ omcontext show baseline
 omcontext show latest
 ```
 
-Machine-readable JSON is also available for the snapshot and delta commands:
+Machine-readable JSON is available for the snapshot and delta commands:
 
 ```bash
 omcontext quick --json
 omcontext baseline --json
 omcontext incident --json
 omcontext diff --json
+```
+
+Version/help:
+
+```bash
+omcontext --version
+omcontext --help
 ```
 
 `baseline` stores a known-good reference, `quick` checks the current state without saving a snapshot, `incident` captures and compares the current state to the baseline, `diff` re-renders the latest saved comparison, and `show` inspects the stored sanitized baseline or latest snapshot.
