@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PROGRAM="omrescue"
-VERSION="1.0.0"
+VERSION="1.0.1"
 
 umask 077
 
@@ -13,6 +13,7 @@ plugins_dir="$config_dir/plugins"
 state_root="${XDG_STATE_HOME:-$home_dir/.local/state}/omrescue"
 snapshots_dir="$state_root/snapshots"
 active_file="$state_root/active"
+lock_file="$state_root/lock"
 restart_shell=true
 force_restore=false
 
@@ -82,6 +83,12 @@ safe_restart() {
 ensure_state_dirs() {
   mkdir -p "$snapshots_dir"
   chmod 700 "$state_root" "$snapshots_dir" 2>/dev/null || true
+}
+
+lock_state() {
+  ensure_state_dirs
+  exec {lock_fd}>"$lock_file"
+  flock -n "$lock_fd" || fail "another plugin rescue operation is already running"
 }
 
 active_snapshot_dir() {
@@ -219,7 +226,7 @@ rescue() {
   }
   jq -e . "$config_file" >/dev/null 2>&1 || fail "$config_file is not valid JSON"
 
-  ensure_state_dirs
+  lock_state
   if active_snapshot_dir >/dev/null 2>&1; then
     fail "rescue mode is already active; run '$PROGRAM status' or '$PROGRAM restore' first"
   fi
@@ -264,6 +271,12 @@ rescue() {
     exit 0
   fi
 
+  if ! cmp -s "$config_file" "$snapshot/original-shell.json"; then
+    rm -f "$work"
+    rm -rf "$snapshot"
+    fail "shell.json changed during rescue; nothing was overwritten"
+  fi
+
   cp -a "$work" "$snapshot/safe-shell.json"
   chmod --reference="$config_file" "$work" 2>/dev/null || chmod 600 "$work"
   mv -f "$work" "$config_file"
@@ -280,6 +293,7 @@ rescue() {
 restore() {
   require_jq
   [[ $EUID -ne 0 ]] || fail "do not run this tool as root"
+  lock_state
   local snapshot
   snapshot=$(active_snapshot_dir) || fail "rescue mode is not active"
   local original="$snapshot/original-shell.json"
