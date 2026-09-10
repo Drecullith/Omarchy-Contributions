@@ -1,6 +1,6 @@
 # Omarchy Plugin Rescue
 
-**Version 1.0.0 — complete scope**
+**Version 1.0.1 — complete scope**
 
 `omrescue` is a small external recovery utility for **Omarchy 4 / Quattro shell plugins**.
 
@@ -60,7 +60,9 @@ omrescue status
 
 - Refuses to run as root.
 - Uses owner-only state directories and snapshots.
+- Serializes rescue/restore state changes with a non-blocking `flock`, so two recovery operations cannot mutate the same state at once.
 - Uses atomic replacement for `shell.json`.
+- Re-checks the original `shell.json` immediately before installing the safe copy and aborts if another process changed it during rescue.
 - Does not delete, move, source, import, or execute plugin files.
 - Trusts clone metadata only when `clonedFrom` points into Omarchy's reserved `omarchy.*` first-party namespace.
 - Preserves a byte-for-byte copy of the original `shell.json`.
@@ -106,6 +108,7 @@ omrescue version
 - Omarchy 4 / Quattro
 - Bash
 - `jq` (already used by Omarchy's own shell/plugin tooling)
+- `flock` from util-linux
 - Core GNU userland (`cp`, `mv`, `mktemp`, `cmp`, `chmod`, `awk`, `sort`)
 
 ## Test
@@ -115,7 +118,7 @@ bash -n tools/plugin-rescue/bin/omrescue
 bash tools/plugin-rescue/test/run.sh
 ```
 
-The test suite uses isolated temporary HOME/state directories. It covers normal third-party widgets/services/bars, stale IDs, clone restoration, exact restore, restore conflict protection, malformed manifests, no-op behavior, and hostile clone metadata.
+The test suite uses isolated temporary HOME/state directories. It covers normal third-party widgets/services/bars, stale IDs, clone restoration, exact restore, restore conflict protection, malformed manifests, no-op behavior, hostile clone metadata, and concurrent-operation locking.
 
 ## What it deliberately does not do
 
@@ -135,4 +138,4 @@ If the failure exists with third-party shell plugins removed, use Omarchy's norm
 
 > From a terminal or TTY, a user can make an existing Omarchy shell configuration temporarily free of third-party shell-plugin references without losing unrelated customization, restart into that safe configuration, and later restore the exact original config.
 
-That is v1.0.0. There is no planned feature roadmap.
+That remains the complete v1 scope. Version 1.0.1 only hardens state/concurrency handling; it does not expand the tool's mission.
