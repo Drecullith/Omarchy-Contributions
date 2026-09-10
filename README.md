@@ -18,17 +18,20 @@ omrescue
 
 Restore the exact pre-rescue shell configuration with `omrescue restore`.
 
-### Omarchy Rollback Check — v1.0.0
+### Omarchy Rollback Check + Guided Recovery
 
-A read-only diagnostic for the root/home migration-ledger drift that can follow an Omarchy root snapshot restore. It reports conservative evidence classes and never changes snapshots, migration markers, packages, system files, or user configuration.
+`omrollback-check` remains the conservative, read-only detector for root/home migration-ledger drift after an Omarchy root snapshot restore.
+
+`omrollback-plan` is the new read-only recovery companion. It turns Rollback Check findings into a bounded inspect → prepare → verify sequence and, when available, correlates them with Omarchy Context Snapshot schema-v1 deltas.
 
 See [`tools/rollback-check/`](tools/rollback-check/README.md).
 
 ```bash
 omrollback-check
+omrollback-plan
 ```
 
-`CONFIRMED` findings are limited to exact upstream migration revisions with audited machine-completion invariants. Broader timeline evidence is reported only as `POTENTIAL` on a matching split Btrfs root/home layout.
+The planner can emit stable JSON for deterministic tooling and future Lychnos integration, but it explicitly authorizes **no automatic repair actions**. It never restores snapshots, replays migrations, deletes markers, changes packages/configuration, or restarts services.
 
 ### Omarchy Migration Check — v1.0.0
 
@@ -70,7 +73,7 @@ Install Plugin Rescue:
 bash tools/plugin-rescue/install.sh
 ```
 
-Install Rollback Check:
+Install Rollback Check + Guided Recovery:
 
 ```bash
 bash tools/rollback-check/install.sh
@@ -88,7 +91,7 @@ Install Context Snapshot:
 bash tools/context-snapshot/install.sh
 ```
 
-All installers place their command in `~/.local/bin`. None uses `sudo`, installs a daemon, or modifies Omarchy's own command files.
+All installers place their command(s) in `~/.local/bin`. None installs a daemon or modifies Omarchy's own command files.
 
 ## Project boundaries
 

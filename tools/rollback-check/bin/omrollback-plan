@@ -1,0 +1,352 @@
+#!/usr/bin/python3
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+VERSION = "1.0.0"
+PLAN_SCHEMA_VERSION = 1
+
+
+def eprint(text: str) -> None:
+    print(text, file=sys.stderr)
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        prog="omrollback-plan",
+        description="Generate a read-only guided recovery plan from Omarchy rollback evidence.",
+    )
+    p.add_argument("--json", action="store_true", help="emit schema-v1 JSON")
+    p.add_argument("--no-context", action="store_true", help="do not consult omcontext")
+    p.add_argument("--context-file", type=Path, help="read an omcontext schema-v1 delta from this file")
+    p.add_argument("--version", action="version", version=f"omrollback-plan {VERSION}")
+    return p.parse_args()
+
+
+def run(cmd: list[str]) -> tuple[int, str, str]:
+    proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+def checker_command() -> str:
+    override = os.environ.get("OMROLLBACK_PLAN_CHECK_COMMAND")
+    if override:
+        return override
+    found = shutil.which("omrollback-check")
+    if not found:
+        raise RuntimeError("omrollback-check is required. Install Rollback Check first.")
+    return found
+
+
+def parse_checker(status: int, stdout: str, stderr: str) -> dict[str, Any]:
+    confirmed: list[str] = []
+    potential: list[str] = []
+    info: list[str] = []
+    for line in (stdout + "\n" + stderr).splitlines():
+        if line.startswith("CONFIRMED: "):
+            confirmed.append(line.removeprefix("CONFIRMED: "))
+        elif line.startswith("POTENTIAL: "):
+            potential.append(line.removeprefix("POTENTIAL: "))
+        elif line.startswith("INFO: "):
+            info.append(line.removeprefix("INFO: "))
+
+    if confirmed:
+        rollback_status = "confirmed"
+    elif potential:
+        rollback_status = "potential"
+    elif status == 2:
+        rollback_status = "incomplete"
+    elif status == 0:
+        rollback_status = "clean"
+    else:
+        rollback_status = "unknown"
+
+    split = any("separate Btrfs mount/subvolume units" in line for line in info)
+    return {
+        "status": rollback_status,
+        "diagnostic_exit_status": status,
+        "confirmed": confirmed,
+        "potential": potential,
+        "info": info,
+        "split_root_home_rollback_units": split,
+    }
+
+
+def validate_context(data: Any) -> dict[str, Any]:
+    if not isinstance(data, dict) or data.get("schema_version") != 1:
+        raise ValueError("unsupported Context Snapshot schema")
+    changes = data.get("changes")
+    current = data.get("current")
+    if not isinstance(changes, dict) or not isinstance(current, dict):
+        raise ValueError("invalid Context Snapshot delta")
+
+    changed_packages: list[str] = []
+    for key in ("packages_added", "packages_removed"):
+        values = changes.get(key, [])
+        if isinstance(values, list):
+            changed_packages.extend(x for x in values if isinstance(x, str))
+    values = changes.get("packages_changed", [])
+    if isinstance(values, list):
+        changed_packages.extend(
+            x["name"] for x in values if isinstance(x, dict) and isinstance(x.get("name"), str)
+        )
+
+    migrations = [x for x in changes.get("migrations_added", []) if isinstance(x, str)]
+    configs = [x for x in changes.get("configs_changed", []) if isinstance(x, str)]
+    failed = [x for x in changes.get("failed_services_new", []) if isinstance(x, str)]
+    omarchy = changes.get("omarchy", {}) if isinstance(changes.get("omarchy", {}), dict) else {}
+    incomplete = current.get("collection_incomplete", [])
+    if not isinstance(incomplete, list):
+        incomplete = []
+    privacy = current.get("privacy_scan", {})
+    if not isinstance(privacy, dict):
+        privacy = {}
+
+    return {
+        "status": "available",
+        "reason": "schema-v1 delta loaded",
+        "health": data.get("health", "unknown"),
+        "privacy_scan": privacy.get("status", "UNKNOWN"),
+        "counts": {
+            "package_changes": len(changed_packages),
+            "new_migrations": len(migrations),
+            "config_changes": len(configs),
+            "new_failed_services": len(failed),
+            "omarchy_metadata_changes": len(omarchy),
+            "incomplete_collectors": len(incomplete),
+        },
+        "evidence": {
+            "packages": changed_packages[:20],
+            "migrations": migrations[:20],
+            "configs": configs[:20],
+            "failed_services": failed[:20],
+        },
+    }
+
+
+def load_context(args: argparse.Namespace) -> dict[str, Any]:
+    unavailable = {
+        "status": "unavailable",
+        "reason": "not requested" if args.no_context else "no usable Context Snapshot delta",
+        "health": "unknown",
+        "privacy_scan": "UNKNOWN",
+        "counts": {
+            "package_changes": 0,
+            "new_migrations": 0,
+            "config_changes": 0,
+            "new_failed_services": 0,
+            "omarchy_metadata_changes": 0,
+            "incomplete_collectors": 0,
+        },
+        "evidence": {"packages": [], "migrations": [], "configs": [], "failed_services": []},
+    }
+    if args.no_context:
+        return unavailable
+
+    try:
+        if args.context_file is not None:
+            data = json.loads(args.context_file.read_text(encoding="utf-8"))
+            return validate_context(data)
+
+        command = shutil.which("omcontext")
+        if not command:
+            unavailable["reason"] = "omcontext is not installed"
+            return unavailable
+        status, stdout, _stderr = run([command, "diff", "--json"])
+        if status not in (0, 1) or not stdout.strip():
+            unavailable["reason"] = "omcontext has no usable baseline/current delta"
+            return unavailable
+        return validate_context(json.loads(stdout))
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        unavailable["reason"] = str(exc)
+        return unavailable
+
+
+def build_steps(rollback_status: str, context: dict[str, Any]) -> list[dict[str, str]]:
+    steps: list[dict[str, str]] = [
+        {
+            "id": "preserve-evidence",
+            "kind": "inspect",
+            "text": "Preserve the current rollback finding and Context Snapshot delta before changing the machine.",
+        }
+    ]
+
+    if rollback_status == "confirmed":
+        steps += [
+            {
+                "id": "choose-coherent-state",
+                "kind": "decision",
+                "text": "Choose one coherent recovery target; avoid keeping an older root filesystem with newer home-side migration state.",
+            },
+            {
+                "id": "inspect-proven-migration",
+                "kind": "inspect",
+                "text": "Inspect the exact migration named by the CONFIRMED finding and verify which machine-side effect is missing.",
+            },
+            {
+                "id": "prepare-recovery",
+                "kind": "prepare",
+                "text": "Prefer a consistent known-good snapshot pair when available; otherwise prepare a narrowly scoped reviewed repair for the proven missing machine-side effect.",
+            },
+        ]
+    elif rollback_status == "potential":
+        steps += [
+            {
+                "id": "correlate-timeline",
+                "kind": "inspect",
+                "text": "Correlate snapshot timing with the newer user-ledger markers and Context Snapshot changes before deciding that rollback caused the drift.",
+            },
+            {
+                "id": "block-blind-replay",
+                "kind": "guard",
+                "text": "Do not replay migrations or delete migration markers from POTENTIAL evidence alone.",
+            },
+        ]
+    elif rollback_status == "incomplete":
+        steps.append(
+            {
+                "id": "restore-evidence",
+                "kind": "inspect",
+                "text": "Restore access to the Omarchy migration tree or other missing evidence before making a rollback decision.",
+            }
+        )
+    else:
+        steps.append(
+            {
+                "id": "investigate-other-deltas",
+                "kind": "inspect",
+                "text": "Do not perform rollback-specific repair from a clean result; investigate other Context Snapshot changes first.",
+            }
+        )
+
+    counts = context["counts"]
+    if counts["package_changes"]:
+        steps.append(
+            {
+                "id": "review-packages",
+                "kind": "inspect",
+                "text": "Review changed packages before considering any downgrade; package changes are correlation evidence, not proof of cause.",
+            }
+        )
+    if counts["config_changes"]:
+        steps.append(
+            {
+                "id": "review-configs",
+                "kind": "inspect",
+                "text": "Review changed config fingerprints against the known-good copy before overwriting any configuration.",
+            }
+        )
+    if counts["new_failed_services"]:
+        steps.append(
+            {
+                "id": "review-services",
+                "kind": "inspect",
+                "text": "Inspect the newly failed services and their current-boot logs before restarting or disabling them.",
+            }
+        )
+
+    steps.append(
+        {
+            "id": "verify-recovery",
+            "kind": "verify",
+            "text": "After an explicitly approved recovery, re-run omrollback-check and omcontext incident to verify the mismatch is gone and no new failure appeared.",
+        }
+    )
+    return steps
+
+
+def render_human(plan: dict[str, Any], checker_text: str) -> str:
+    lines = [
+        f"OMARCHY GUIDED RECOVERY — {plan['rollback_status'].upper()}",
+        "Advisory only: no repair action was executed.",
+        "",
+        "Rollback evidence:",
+    ]
+    if checker_text.strip():
+        lines.extend(f"  {line}" for line in checker_text.strip().splitlines())
+    else:
+        lines.append("  No diagnostic output was produced.")
+
+    context = plan["context"]
+    lines += ["", f"Context Snapshot: {context['status']} ({context['reason']})"]
+    if context["status"] == "available":
+        c = context["counts"]
+        lines.append(f"  health={context['health']} privacy={context['privacy_scan']}")
+        lines.append(
+            "  changes: "
+            f"{c['package_changes']} package, {c['new_migrations']} migration, "
+            f"{c['config_changes']} config, {c['new_failed_services']} new failed service, "
+            f"{c['omarchy_metadata_changes']} Omarchy metadata"
+        )
+        ev = context["evidence"]
+        if ev["migrations"]:
+            lines.append("  new migration markers: " + ", ".join(ev["migrations"]))
+        if ev["failed_services"]:
+            lines.append("  new failed services: " + ", ".join(ev["failed_services"]))
+        if ev["configs"]:
+            lines.append("  changed config fingerprints: " + ", ".join(ev["configs"]))
+
+    lines += ["", "Recommended sequence:"]
+    for index, step in enumerate(plan["recommended_steps"], 1):
+        lines.append(f"  {index}. {step['text']}")
+
+    lines += ["", "Automatic actions deliberately blocked:"]
+    lines.extend(f"  - {item}" for item in plan["blocked_automatic_actions"])
+    lines += ["", "No changes were made."]
+    return "\n".join(lines) + "\n"
+
+
+def main() -> int:
+    args = parse_args()
+    if os.geteuid() == 0 and os.environ.get("OMROLLBACK_PLAN_ALLOW_ROOT_FOR_TESTS") != "1":
+        eprint("Do not run omrollback-plan as root; run it as the Omarchy user whose state should be recovered.")
+        return 2
+
+    try:
+        check = checker_command()
+    except RuntimeError as exc:
+        eprint(str(exc))
+        return 2
+
+    status, stdout, stderr = run([check])
+    rollback = parse_checker(status, stdout, stderr)
+    context = load_context(args)
+    plan = {
+        "plan_schema_version": PLAN_SCHEMA_VERSION,
+        "tool": "omrollback-plan",
+        "tool_version": VERSION,
+        "rollback_status": rollback["status"],
+        "diagnostic_exit_status": rollback["diagnostic_exit_status"],
+        "split_root_home_rollback_units": rollback["split_root_home_rollback_units"],
+        "findings": {"confirmed": rollback["confirmed"], "potential": rollback["potential"]},
+        "context": context,
+        "recommended_steps": build_steps(rollback["status"], context),
+        "automatic_actions_permitted": False,
+        "blocked_automatic_actions": [
+            "automatic snapshot restore",
+            "automatic migration replay",
+            "migration-marker deletion",
+            "automatic package downgrade/install/removal",
+            "automatic configuration overwrite",
+            "automatic service restart/disable",
+        ],
+    }
+
+    if args.json:
+        print(json.dumps(plan, indent=2, sort_keys=True))
+    else:
+        checker_text = stdout + (stderr if stderr else "")
+        sys.stdout.write(render_human(plan, checker_text))
+
+    return status if status in (0, 1, 2) else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

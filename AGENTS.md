@@ -33,7 +33,7 @@ Out of scope unless a real defect requires a targeted fix:
 - Hyprland plugin recovery;
 - general system repair.
 
-## Omarchy Rollback Check v1 scope
+## Omarchy Rollback Check + Guided Recovery scope
 
 Finished scope:
 - inspect the normal user's Omarchy migration ledger without modifying it;
@@ -41,16 +41,22 @@ Finished scope:
 - emit `CONFIRMED` only for exact audited migration revisions with direct machine-completion invariants;
 - emit `POTENTIAL` only for bounded timeline evidence on a matching split rollback layout;
 - refuse root and report incomplete checks explicitly;
-- never source or execute migration scripts.
+- never source or execute migration scripts;
+- generate a separate read-only guided recovery plan from checker evidence;
+- optionally correlate Omarchy Context Snapshot schema-v1 delta evidence;
+- emit schema-v1 recovery-plan JSON for deterministic tooling;
+- keep all automatic machine-changing actions explicitly blocked.
 
 Out of scope unless a real defect requires a targeted fix:
 - snapshot creation, restore, or deletion;
 - migration replay or marker deletion;
 - automatic repair;
 - package changes;
+- config overwrite;
+- automatic service restart/disable;
 - daemon/service;
 - GUI;
-- network access, telemetry, or AI features.
+- network access, telemetry, or AI/model calls.
 
 ## Omarchy Migration Check v1 scope
 
