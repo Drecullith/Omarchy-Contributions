@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.1 — 2026-09-10
+
+- Serialize rescue/restore state mutation with a non-blocking `flock`.
+- Abort rescue if `shell.json` changes after the snapshot but before the safe configuration is installed.
+- Add regression coverage for concurrent-operation locking.
+- Document the new safety behavior and `flock` dependency.
+
 ## 1.0.0 — 2026-09-06
 
 - Initial release.
