@@ -44,11 +44,16 @@ jobs:
       - name: Syntax check
         run: |
           bash -n tools/rollback-check/bin/omrollback-check
+          python3 -m py_compile tools/rollback-check/bin/omrollback-plan
           bash -n tools/rollback-check/install.sh
           bash -n tools/rollback-check/test/run.sh
+          bash -n tools/rollback-check/test/plan.sh
 
-      - name: Run isolated tests
+      - name: Run isolated checker tests
         run: bash tools/rollback-check/test/run.sh
+
+      - name: Run isolated guided-recovery tests
+        run: bash tools/rollback-check/test/plan.sh
 
       - name: Installer smoke test
         run: |
@@ -56,7 +61,9 @@ jobs:
           trap 'rm -rf "$test_home"' EXIT
           HOME="$test_home" bash tools/rollback-check/install.sh
           test -x "$test_home/.local/bin/omrollback-check"
+          test -x "$test_home/.local/bin/omrollback-plan"
           "$test_home/.local/bin/omrollback-check" version | grep -Fx 'omrollback-check 1.0.0'
+          "$test_home/.local/bin/omrollback-plan" --version | grep -Fx 'omrollback-plan 1.0.0'
 
       - name: Verify root refusal
         run: |
@@ -66,6 +73,13 @@ jobs:
           set -e
           test "$status" -eq 2
           grep -F 'Do not run omrollback-check as root' <<<"$output"
+
+          set +e
+          output="$(sudo -H env HOME=/root tools/rollback-check/bin/omrollback-plan --no-context 2>&1)"
+          status=$?
+          set -e
+          test "$status" -eq 2
+          grep -F 'Do not run omrollback-plan as root' <<<"$output"
 
   migration-check:
     runs-on: ubuntu-latest

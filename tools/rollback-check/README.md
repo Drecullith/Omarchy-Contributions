@@ -1,28 +1,54 @@
-# Omarchy Rollback Check — v1.0.0
+# Omarchy Rollback Check + Guided Recovery
 
-`omrollback-check` is a small, read-only diagnostic for a specific Omarchy 4 / Quattro failure class: a root snapshot restore can rewind the system while the user's migration ledger under `$HOME` survives.
+This contribution now ships two read-only commands:
 
-That split can leave Omarchy believing a migration already ran even when some machine-side effect was rolled back.
+- `omrollback-check` v1.0.0 — conservative detection of root/home migration-ledger drift after an Omarchy root snapshot restore.
+- `omrollback-plan` v1.0.0 — a guided recovery planner that combines Rollback Check evidence with an optional Omarchy Context Snapshot delta.
 
-The tool **does not repair anything**. It reports only evidence it can safely classify and leaves recovery decisions to the user or maintainer.
+The checker remains the proof/heuristic boundary. The planner does **not** broaden that evidence and does **not** execute repairs.
 
 ## Usage
 
+Run the diagnostic:
+
 ```bash
 omrollback-check
-omrollback-check version
 ```
 
-Run it as the normal Omarchy user, not as root.
+Generate a human recovery plan:
 
-## Result classes
+```bash
+omrollback-plan
+```
+
+If `omcontext` is installed and has a baseline/latest delta, the planner consumes `omcontext diff --json` automatically. You can also provide an explicit schema-v1 delta:
+
+```bash
+omrollback-plan --context-file /path/to/context-delta.json
+```
+
+Machine-readable planning output for deterministic tooling and future Lychnos integration:
+
+```bash
+omrollback-plan --json
+```
+
+Disable Context Snapshot correlation:
+
+```bash
+omrollback-plan --no-context
+```
+
+Run both commands as the normal Omarchy user, not as root.
+
+## Rollback Check result classes
 
 - **CONFIRMED** — a direct migration-state inconsistency was proven using an audited machine-completion invariant from the installed Omarchy migration revision.
 - **POTENTIAL** — the surviving user migration timeline is newer than the restored migration tree while root and home are separate Btrfs rollback units.
-- **No evidence detected** — the checker found neither of the above. This does not prove a rollback never happened; it means the safe checks found nothing they can prove or bound.
-- **INCOMPLETE** — required Omarchy migration data is unavailable, so the check cannot finish reliably.
+- **No evidence detected** — the safe checks found nothing they can prove or bound.
+- **INCOMPLETE** — required migration evidence is unavailable.
 
-Exit codes:
+`omrollback-check` exit codes remain:
 
 ```text
 0  no rollback-related inconsistency evidence detected
@@ -30,26 +56,25 @@ Exit codes:
 2  incomplete check, invalid invocation, or missing required dependency
 ```
 
+`omrollback-plan` preserves the diagnostic exit status so automation can distinguish clean, finding, and incomplete states without parsing prose.
+
+## What Guided Recovery adds
+
+The planner keeps recovery in three phases:
+
+1. **Inspect** — preserve the rollback finding and Context Snapshot delta, then correlate migration markers, package changes, config fingerprints, failed services, and Omarchy metadata.
+2. **Prepare** — choose a coherent recovery target and prepare a narrowly scoped response appropriate to `CONFIRMED`, `POTENTIAL`, `INCOMPLETE`, or clean evidence.
+3. **Verify** — after a separately approved recovery action, re-run `omrollback-check` and `omcontext incident`.
+
+Its JSON contract is schema version `1` and explicitly reports rollback status, evidence, context counts, advisory steps, `automatic_actions_permitted: false`, and the automatic actions the planner blocks.
+
 ## Safety model
 
-`omrollback-check`:
+Neither command restores/creates/deletes snapshots, edits migration markers, runs/replays migrations, changes packages, edits configuration, restarts/disables services, uses `sudo`, executes migration scripts, uploads data, or performs network access.
 
-- never changes snapshots;
-- never deletes or edits migration markers;
-- never runs `omarchy-migrate`;
-- never replays migrations;
-- never changes packages, system files, or user configuration;
-- never uses `sudo`;
-- never sources or executes migration scripts;
-- performs no network access and sends no telemetry.
+`omrollback-plan` executes only the read-only `omrollback-check` command and, when available, `omcontext diff --json`. Context Snapshot schema versions other than `1` are rejected rather than guessed at.
 
-Migration scripts are treated as files to hash/list only. Direct `CONFIRMED` findings are limited to exact upstream script revisions whose machine-completion marker semantics were reviewed for v1. If one of those scripts changes upstream, the direct proof is disabled rather than guessing about the new control flow.
-
-## Why the checker is conservative
-
-Not every `/var/lib/omarchy/migrations/...` marker in an Omarchy migration means "this migration must always have written this marker." Some are conditional; some are temporary. A broad text scan would therefore create false alarms on healthy systems.
-
-v1 intentionally avoids that trap. It uses only audited direct invariants plus a separate, explicitly `POTENTIAL` timeline check.
+A plan is **advice**, not authorization. Future consumers such as Lychnos must still use their own permission/action mediation before any machine change.
 
 ## Install
 
@@ -59,12 +84,8 @@ From the repository root:
 bash tools/rollback-check/install.sh
 ```
 
-The installer places `omrollback-check` in `~/.local/bin`.
+The installer places both commands in `~/.local/bin`.
 
-Dependencies: Bash, `git`, `findmnt`, and standard GNU/Linux userland already expected on Omarchy.
+Dependencies: Bash, `git`, `findmnt`, Python 3, and standard GNU/Linux userland already expected on Omarchy. Context Snapshot is optional; without it, the planner works from Rollback Check evidence alone.
 
-## Scope boundary
-
-v1 is finished when it can safely report the documented evidence without modifying the machine. It is **not** a rollback manager, migration repair utility, snapshot browser, daemon, GUI, AI assistant, or automatic recovery system.
-
-See [`RESEARCH.md`](RESEARCH.md) for the source analysis and false-positive constraints behind the design.
+See [`RESEARCH.md`](RESEARCH.md) for the evidence model and the recovery-planning safety boundary.

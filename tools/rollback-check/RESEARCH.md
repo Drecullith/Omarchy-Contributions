@@ -1,46 +1,16 @@
-# Research notes — Omarchy Rollback Check
+# Research notes — Omarchy Rollback Check + Guided Recovery
 
-Research date: 2026-09-06.
+Original checker research: 2026-09-06. Guided Recovery audit: 2026-09-10.
 
 ## Problem source
 
-Omarchy issue `#9828` documents and reproduces a migration-ledger drift class after Snapper rollback.
+Omarchy issue `#9828` documents the migration-ledger drift class: a root snapshot restore can rewind machine-side state while the per-user migration ledger under `$HOME/.local/state/omarchy/migrations` survives on a separate Btrfs home subvolume.
 
-Current Omarchy behavior relevant to the problem:
-
-- `bin/omarchy-migrate` stores the per-user migration ledger under `$HOME/.local/state/omarchy/migrations` by default.
-- User markers use the migration filename, including `.sh`.
-- A migration runs only when that user marker is absent.
-- Omarchy's root snapshot flow restores the root Snapper unit; `$HOME` can live on a separate Btrfs subvolume and survive that restore.
-- `omarchy snapshot restore` delegates to `limine-snapper-restore`; there is no user-facing post-restore reconciliation of the per-user migration ledger.
-
-The result can be mixed state: root-side effects may be rewound while home-side state and the per-user completion marker survive.
-
-## Why automatic replay is out of scope
-
-The issue investigation explicitly warns that replaying migrations wholesale is not a safe generic recovery strategy. Migrations can:
-
-- run package transactions;
-- fail-fast and block later migrations;
-- combine root-side and home-side effects;
-- be conditional on the machine's current state.
-
-Accordingly, v1 is diagnostic only.
+`omrollback-check` is intentionally conservative. It never assumes every machine marker mentioned by a migration is a permanent completion invariant, because current Omarchy includes conditional and temporary machine markers.
 
 ## Direct machine-completion invariants
 
-A first draft considered scanning every migration script for literal `/var/lib/omarchy/migrations/...` paths and treating a missing machine marker plus a surviving user marker as proof.
-
-That approach was rejected during adversarial testing because it is false-positive prone.
-
-Examples in current Omarchy source include:
-
-- `1786482992.sh`: the machine marker is written only when a Limine rebuild is actually required; a healthy no-op run can legitimately leave the marker absent.
-- `1786605598.sh`: the rebuild marker is conditional on NVIDIA/initramfs state.
-- `1788009111.sh`: the migration can exit successfully when `cups-browsed` is not installed, without writing its machine marker.
-- `1788102906.sh`: uses a suffixed marker as temporary reload bookkeeping rather than permanent completion evidence.
-
-Therefore v1 emits `CONFIRMED` only for exact migration script revisions audited to have a permanent machine-completion invariant on successful execution:
+`CONFIRMED` remains limited to these exact audited migration script revisions:
 
 | Migration | Git blob | Machine marker |
 | --- | --- | --- |
@@ -48,47 +18,42 @@ Therefore v1 emits `CONFIRMED` only for exact migration script revisions audited
 | `1787815267.sh` | `b3f9282a9664e9fb195e74ad99e2efa3665e0f44` | `/var/lib/omarchy/migrations/1787815267` |
 | `1788025225.sh` | `295b71ba916003ac965bf3cc13f84af9f8c5f472` | `/var/lib/omarchy/migrations/1788025225` |
 
-The checker compares the installed script using `git hash-object --no-filters` with global/system Git configuration disabled. If upstream changes one of these scripts, the direct proof is disabled instead of extending old assumptions to new code.
+The checker hashes the installed script with `git hash-object --no-filters` while disabling global/system Git configuration. If an audited script changes, direct proof is disabled rather than extended to new control flow.
 
-## Potential timeline signal
+## Why Guided Recovery is a companion, not automatic repair
 
-Omarchy migration filenames are numeric chronological IDs. If the user's surviving ledger contains a numeric marker newer than every migration script in the current Omarchy tree, that is useful evidence that home has seen a newer migration timeline than root.
+Automatic replay remains unsafe. Omarchy migrations can perform package transactions, mix root/home effects, be hardware/state conditional, and fail-fast. A `POTENTIAL` timeline mismatch is evidence, not proof.
 
-This is **not proof** because migrations can be removed/superseded and development installs can have unusual histories. v1 emits this only as `POTENTIAL`, and only when `findmnt` shows root and home as separate Btrfs mount/subvolume units consistent with the rollback mechanism in `#9828`.
+For that reason `omrollback-plan` is a separate advisory layer instead of changing the proof logic in `omrollback-check`. It consumes the checker's existing output and optionally correlates it with `omcontext diff --json` schema v1.
 
-## Novelty / duplication check
+The planner deliberately does not restore snapshots, replay migrations or delete markers, change packages, overwrite configuration, restart/disable services, use `sudo`, or infer causality from Context Snapshot changes.
 
-Before implementation, searches covered:
+It only builds an inspect → prepare → verify sequence and marks all automatic repair actions as blocked in both human and JSON output.
 
-- the current Omarchy repository;
-- open Omarchy issues and pull requests around snapshot restore, migrations, rollback reconciliation, and migration-state checking;
-- GitHub repository search for Omarchy rollback/migration checker utilities;
-- GitHub code search for the command name `omrollback-check`.
+## Context Snapshot contract
 
-No obvious current public equivalent was found. This is intentionally narrower than a general backup, snapshot, dotfile, or repair tool.
+Guided Recovery accepts only Omarchy Context Snapshot delta schema `1`. It uses bounded fields already sanitized/normalized by `omcontext`: package changes, added numeric migration markers, changed selected config fingerprints, newly failed services, Omarchy metadata changes, collection completeness, and privacy-scan status.
 
-## Maintenance audit — 2026-09-08
+A newer/unknown schema is reported unavailable rather than parsed heuristically.
 
-The rollback assumptions and audited invariants were re-checked against current `quattro`.
+## Upstream maintenance audit — 2026-09-10
 
-- Issue `#9828` is still open.
-- `omarchy-migrate` still records completion under `$HOME/.local/state/omarchy/migrations` and skips migrations whose user marker already exists.
-- `omarchy snapshot restore` still delegates directly to `limine-snapper-restore`; no migration-ledger reconciliation was found in the user-facing restore path.
-- The three migration files used for `CONFIRMED` findings still have exactly the audited Git blob ids listed above.
-- Current source still contains conditional and temporary `/var/lib/omarchy/migrations/...` markers, including newer bookkeeping such as the `1788662350` quarantine/reload markers, so broad marker scanning would still be unsafe.
-- A fresh PR search found no upstream rollback-ledger reconciliation equivalent.
+Current `omacom/omarchy:quattro` at audit time: `8ea51516390320f8e768808b230098e67bdaa82c`.
 
-Conclusion: **v1 remains useful and its current conservative proof set is still valid. No code change is required as of 2026-09-08.**
+Since the previous PR-stack audit head `5ead870507dfb68db696b3ddb948cc3d178e8d62`, upstream changed only Hermes desktop installer/font/test paths. No migration files or rollback/migration-ledger paths changed in those three commits, so the previously re-audited invariant set remains current.
 
-## Definition of Done
+Omarchy itself ships Python-based utilities, so Python 3 is an existing platform dependency rather than a new runtime foreign to the distribution. Guided Recovery still keeps Context Snapshot optional.
 
-v1 is complete when the command:
+## Definition of Done — Guided Recovery 1.0
 
-1. runs as the normal Omarchy user and refuses root;
-2. never modifies snapshots, markers, packages, system files, or user config;
-3. never sources or executes migration scripts;
-4. reports direct inconsistency only from audited exact-revision invariants;
-5. reports newer-home timeline evidence only as `POTENTIAL` on a matching split Btrfs layout;
-6. reports incomplete checks explicitly instead of guessing;
-7. has isolated regression coverage for the known false-positive classes;
-8. contains no network, telemetry, daemon, GUI, AI, or repair behavior.
+The enhancement is complete when:
+
+1. the existing checker proof/heuristic behavior is unchanged;
+2. recovery planning is a separate read-only command;
+3. `CONFIRMED`, `POTENTIAL`, `INCOMPLETE`, and clean evidence produce distinct bounded advice;
+4. Context Snapshot schema-v1 deltas can be correlated without treating correlation as causation;
+5. JSON plan schema v1 exposes the same safety boundary to future tooling;
+6. automatic machine-changing actions are explicitly blocked;
+7. root invocation is refused;
+8. tests prove the planner never invokes privileged/snapshot mutation commands;
+9. no network, telemetry, daemon, GUI, or AI/model call is introduced.
